@@ -16,8 +16,6 @@ object CountryCategoryStats {
     val spark: SparkSession = SparkSession.builder.appName("YTTrend").getOrCreate()
 
     for (country <- Country.values) {
-      println(country.toString)
-      println(country.id)
       // Read dataset and category IDs into DataFrames.
       val datasetDF: DataFrame = readDatasetAsDF(spark, country).cache()
       val categoryIdDF: DataFrame = readCategoryIdAsDF(spark, country).cache()
