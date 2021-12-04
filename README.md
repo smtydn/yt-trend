@@ -20,3 +20,4 @@ $ spark-submit \
 
 ## Environment Variables
 - `DATASET_FOLDER_PATH`: Folder path that the dataset exists. E.g. `/tmp/dataset`
+- `CCS_OUTPUT_PATH`: Folder path that will contain extraction results for `CountryCategoryStats`
