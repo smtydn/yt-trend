@@ -4,25 +4,34 @@ import org.apache.spark.sql.{SparkSession, DataFrame}
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.SaveMode
 
-import yttrend.Country.Country
+import yttrend._
 
 object CountryCategoryStats {
   /**
     * Run the Spark application.
-    *
     * @param args
     */
   def main(args: Array[String]): Unit = {
-    val spark: SparkSession = SparkSession.builder.appName("YTTrend").getOrCreate()
+    val spark: SparkSession = SparkSession
+      .builder
+      .appName(ccsAppName)
+      .getOrCreate()
 
+    import spark.implicits._
+    var resultDF: DataFrame = Seq.empty[(Integer, Integer, String, Integer)].toDF(
+      Seq("category_id", "count", "title", "country"):_*
+    )
+    
     for (country <- Country.values) {
       // Read dataset and category IDs into DataFrames.
       val datasetDF: DataFrame = readDatasetAsDF(spark, country).cache()
       val categoryIdDF: DataFrame = readCategoryIdAsDF(spark, country).cache()
 
-      val countryCategoryCount: DataFrame = countryCategoryCountDesc(datasetDF, categoryIdDF, country)
-      writeDataFrameToJSON(countryCategoryCount, s"country-category-count/${country.toString.toLowerCase}")
+      val countryCategoryCountDF: DataFrame = countryCategoryCountDesc(datasetDF, categoryIdDF, country)
+      resultDF = resultDF.union(countryCategoryCountDF)
     }
+
+    writeDataFrameToJSON(resultDF, "country-category-count")
 
     spark.stop()
   }
@@ -48,7 +57,12 @@ object CountryCategoryStats {
     df1
       .join(df2, df1("category_id") === df2("id"))
       .drop("id")
-      .withColumn("country", lit(country.id))
+      .select(
+        col("category_id").cast("int"),
+        col("count").cast("int"),
+        col("title")
+      )
+      .withColumn("country", lit(country.id).cast("int"))
   }
 
   /**
@@ -59,7 +73,7 @@ object CountryCategoryStats {
     * @return DataFrame for given country's dataset file.
     */
   private def readDatasetAsDF(spark: SparkSession, country: Country.Value): DataFrame = {
-    val datasetPath: String = s"${datasetFolderPath.get}/${country}videos.csv"
+    val datasetPath: String = s"${datasetFolderPath}/${country}videos.csv"
 
     spark
       .read
@@ -75,7 +89,7 @@ object CountryCategoryStats {
     * @return DataFrame for given country's category IDs.
     */
   private def readCategoryIdAsDF(spark: SparkSession, country: Country.Value): DataFrame = {
-    val categoryIdFilePath: String = s"${datasetFolderPath.get}/${country}_category_id.json"
+    val categoryIdFilePath: String = s"${datasetFolderPath}/${country}_category_id.json"
 
     spark
       .read
@@ -94,6 +108,6 @@ object CountryCategoryStats {
   private def writeDataFrameToJSON(df: DataFrame, folderName: String): Unit = {
     df.coalesce(numPartitions = 1)
       .write.mode(SaveMode.Append)
-      .json(s"${countryCategoryStatsOutputPath.get}/${folderName}")
+      .json(s"${ccsOutputPath}/${folderName}")
   }
 }
