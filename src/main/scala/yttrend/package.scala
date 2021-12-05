@@ -5,5 +5,9 @@ package object yttrend {
 
   // CountryCategoryStats
   val ccsAppName: String = "country-category-stats"
-  val ccsOutputPath: String = sys.env.get("CCS_OUTPUT_PATH").get
+  val ccsOutputPath: String = sys.env.getOrElse("CCS_OUTPUT_PATH", "/tmp/ccs-output")
+
+  // LikeRatio
+  val lrAppName: String = "like-ratio"
+  val lrOutputPath: String = sys.env.getOrElse("LR_OUTPUT_PATH", "/tmp/lr-output")
 }

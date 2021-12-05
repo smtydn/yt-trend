@@ -6,67 +6,66 @@ import org.apache.spark.sql.SaveMode
 
 import yttrend._
 
-object CountryCategoryStats {
-  /**
+object LikeRatio {
+   /**
     * Run the Spark application.
+    * 
     * @param args
     */
   def main(args: Array[String]): Unit = {
     val spark: SparkSession = SparkSession
       .builder
-      .appName(ccsAppName)
+      .appName(lrAppName)
       .getOrCreate()
 
     import spark.implicits._
-    var resultDF: DataFrame = Seq.empty[(Integer, Integer, String, Integer)].toDF(
-      Seq("category_id", "count", "title", "country"):_*
+    var resultDF: DataFrame = Seq.empty[(Integer, String, Integer, Integer, Float)].toDF(
+      Seq("category_id", "category_title", "likes", "dislikes", "ratio"):_*
     )
-    
+
     for (country <- Country.values) {
       // Read dataset and category IDs into DataFrames.
-      val datasetDF: DataFrame = readDatasetAsDF(spark, country).cache()
-      val categoryIdDF: DataFrame = readCategoryIdAsDF(spark, country).cache()
+      val datasetDF: DataFrame = readDatasetAsDF(spark, country)
+      val categoryIdDF: DataFrame = readCategoryIdAsDF(spark, country)
 
-      val countryCategoryCountDF: DataFrame = countryCategoryCountDesc(datasetDF, categoryIdDF, country)
-      resultDF = resultDF.union(countryCategoryCountDF)
+      val likeRatioDF: DataFrame = likeRatio(datasetDF, categoryIdDF)
+      resultDF = resultDF.union(likeRatioDF)
     }
 
-    writeDataFrameToJSON(resultDF, ccsAppName)
+    writeDataFrameToJSON(resultDF)
 
     spark.stop()
   }
 
   /**
-    * Create a DataFrame that contains categories' names, IDs and counts of occurrences.
-    * @param datasetDF DataFrame for dataset.
-    * @param categoryIdDF DataFrame for category IDs.
-    * @param country Country's name as a String.
-    * @return DataFrame that contains the columns "category_id", "count", "title" and "country".
+    * Create a DataFrame that holds like-dislike counts and their ratios for a category.
+    * The method joins given DataFrames and calculates the ratio between likes and dislikes.
+    * 
+    * @param datasetDF The dataset as a DataFrame.
+    * @param categoryIdDF Category ID's as a DataFrame.
+    * @return The DataFrame that has the columns "category_id", "likes", "dislikes", "ratio" and "category_title".
     */
-  def countryCategoryCountDesc(datasetDF: DataFrame, categoryIdDF: DataFrame, country: Country.Value): DataFrame = {
-    val df1 = datasetDF
-      .withColumn("category_id", when(col("category_id").cast("int").isNotNull, col("category_id")))
-      .groupBy("category_id")
-      .count()
-      .orderBy(desc("count"))
-
-    val df2 = categoryIdDF
-      .withColumn("items", explode(col("items")))
-      .select(col("items.id"), col("items.snippet.title"))
-
-    df1
-      .join(df2, df1("category_id") === df2("id"))
-      .drop("id")
-      .select(
-        col("category_id").cast("int"),
-        col("count").cast("int"),
-        col("title")
+  def likeRatio(datasetDF: DataFrame, categoryIdDF: DataFrame): DataFrame = {
+    datasetDF
+      .groupBy(col("category_id"))
+      .agg(
+        sum("likes").as("likes"),
+        sum("dislikes").as("dislikes")
       )
-      .withColumn("country", lit(country.id).cast("int"))
+      .withColumn("ratio", round((col("likes") / (col("likes") + col("dislikes"))) * 100, 2))
+      .join(categoryIdDF, "category_id")
+      .select(
+        col("category_id"),
+        col("category_title"),
+        col("likes"),
+        col("dislikes"),
+        col("ratio")
+      )
   }
 
   /**
     * Read CSV file for given country to a DataFrame.
+    * The DataFrame has "category_id", "likes" and "dislikes" columns.
     *
     * @param spark SparkSession instance.
     * @param country Country abbreviation as a String.
@@ -79,10 +78,16 @@ object CountryCategoryStats {
       .read
       .option(key = "header", value = "true")
       .csv(path = datasetPath)
+      .select(
+        col("category_id").cast("int"),
+        col("likes").cast("int"),
+        col("dislikes").cast("int")
+      )
   }
 
   /**
     * Read JSON file for given country to a DataFrame.
+    * The DataFrame has "category_id" and "category_title" columns.
     *
     * @param spark SparkSession instance.
     * @param country Country abbreviation as a String.
@@ -95,6 +100,11 @@ object CountryCategoryStats {
       .read
       .option(key = "multiLine", value = "true")
       .json(path = categoryIdFilePath)
+      .withColumn("items", explode(col("items")))
+      .select(
+        col("items.id").cast("int").as("category_id"),
+        col("items.snippet.title").as("category_title")
+      )
   }
 
   /**
@@ -105,9 +115,9 @@ object CountryCategoryStats {
     * @param df The DataFrame that will be saved.
     * @param folderName Child folder's name.
     */
-  private def writeDataFrameToJSON(df: DataFrame, folderName: String): Unit = {
+  private def writeDataFrameToJSON(df: DataFrame): Unit = {
     df.coalesce(numPartitions = 1)
       .write.mode(SaveMode.Append)
-      .json(s"${ccsOutputPath}/${folderName}")
+      .json(lrOutputPath)
   }
 }
